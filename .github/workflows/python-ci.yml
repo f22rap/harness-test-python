@@ -1,0 +1,57 @@
+name: Python sample CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-sample-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  python-tests:
+    name: Python 3.12 tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Check out the candidate commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Run the three baseline tests
+        shell: python
+        run: |
+          import sys
+          import unittest
+
+          suite = unittest.defaultTestLoader.discover('.', pattern='test_search.py')
+          def test_ids(tests):
+              for test in tests:
+                  if isinstance(test, unittest.TestSuite):
+                      yield from test_ids(test)
+                  else:
+                      yield test.id()
+
+          required = {
+              'test_search.SearchTests.test_empty_and_whitespace',
+              'test_search.SearchTests.test_normal_input_retains_order',
+              'test_search.SearchTests.test_no_match_and_unicode',
+          }
+          found = set(test_ids(suite))
+          if not required.issubset(found):
+              sys.exit('Required baseline tests are missing: ' + ', '.join(sorted(required - found)))
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          if not result.wasSuccessful() or result.skipped or result.expectedFailures:
+              sys.exit(1)
